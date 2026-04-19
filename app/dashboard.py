@@ -1,28 +1,61 @@
 import streamlit as st
 import pandas as pd
-import requests
+import pickle
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+DATA_PATH = os.path.join(BASE_DIR, "..", "data", "processed", "final_time_series_dataset.csv")
+MODEL_PATH = os.path.join(BASE_DIR, "..", "models", "risk_model.pkl")
+
+# -------------------------------
 # Page config
+# -------------------------------
 st.set_page_config(page_title="AI Governance Monitor", layout="wide")
 
-# Title
 st.title("AI Governance Monitoring System")
 
+# -------------------------------
 # Load data
-data = pd.read_csv("data/processed/final_time_series_dataset.csv")
+# -------------------------------
+data = pd.read_csv(DATA_PATH)
 districts = sorted(data["District"].unique())
+
+# -------------------------------
+# Load model
+# -------------------------------
+with open(MODEL_PATH, "rb") as f:
+    model = pickle.load(f)
 
 # Sidebar
 st.sidebar.header("Select District")
 district = st.sidebar.selectbox("District", districts)
 
+# -------------------------------
 # Button action
+# -------------------------------
 if st.sidebar.button("Predict Future Risk"):
 
-    # API call
-    url = f"http://127.0.0.1:8000/predict/{district}"
-    response = requests.get(url)
-    result = response.json()
+    # Get latest data for district
+    district_data = data[data["District"] == district]
+    latest = district_data.sort_values("Year").iloc[-1:]
+
+    # Prepare input
+    X = latest.copy()
+    X = X.drop(columns=["District", "Year"], errors="ignore")
+    X = X.select_dtypes(include=["number"])
+    X = X.fillna(0)
+
+    # -------------------------------
+    # Prediction
+    # -------------------------------
+    try:
+        risk_score = model.predict_proba(X)[0][1]
+    except:
+        st.error("Model feature mismatch. Please check training columns.")
+        st.write("Columns passed:", list(X.columns))
+        st.stop()
+
+    risk_percent = int(risk_score * 100)
 
     # -------------------------------
     # Prediction Result
@@ -30,17 +63,14 @@ if st.sidebar.button("Predict Future Risk"):
     st.subheader("Prediction Result")
 
     col1, col2 = st.columns(2)
-    col1.metric("District", result["district"])
-    col2.metric("Prediction Year", result["predicted_risk_year"])
+    col1.metric("District", district)
+    col2.metric("Prediction Year", int(latest["Year"].values[0]) + 1)
 
-    st.write("Data used:", result["data_year_used"])
+    st.write("Data used:", int(latest["Year"].values[0]))
 
     # -------------------------------
-    # Risk Display (User Friendly)
+    # Risk Display
     # -------------------------------
-    risk_score = result["risk_score"]
-    risk_percent = int(risk_score * 100)
-
     if risk_score < 0.3:
         label = "Low Risk"
         st.success(f"Status: {label}")
@@ -78,35 +108,20 @@ if st.sidebar.button("Predict Future Risk"):
         st.write("High risk detected. Immediate intervention is required.")
 
     # -------------------------------
-    # Key Observations (FIXED + CLEAN)
+    # Key Observations (approx)
     # -------------------------------
     st.subheader("Key Observations")
 
-    # Optional: Rename metrics to meaningful names
     feature_map = {
         "metric_13": "Expenditure",
         "metric_5": "Fund Allocation",
     }
 
-    for exp in result["explanations"]:
-        raw_feature = exp["feature"]
-        feature = feature_map.get(raw_feature, raw_feature.replace("_", " ").title())
+    for col in X.columns[:5]:
+        name = feature_map.get(col, col.replace("_", " ").title())
+        value = float(X[col].values[0])
 
-        impact = exp["impact"]
-        current = exp["current"]
-        avg = exp["average"]
-
-        # Convert to simple human status
-        if impact > 0:
-            status = "Slight increase"
-            box = st.warning
+        if value > X[col].mean():
+            st.warning(f"{name}\nCurrent: ₹{value:.2f} (Above average)")
         else:
-            status = "Stable or decreasing"
-            box = st.success
-
-        box(f"""
-{feature}
-Current: ₹{current:.2f}
-Average: ₹{avg:.2f}
-Status: {status}
-""")
+            st.success(f"{name}\nCurrent: ₹{value:.2f} (Normal)")
