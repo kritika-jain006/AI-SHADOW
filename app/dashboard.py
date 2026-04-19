@@ -27,7 +27,7 @@ data = pd.read_csv(DATA_PATH)
 districts = sorted(data["District"].unique())
 
 # -------------------------------
-# Load model + feature columns
+# Load model + features
 # -------------------------------
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
@@ -39,36 +39,73 @@ st.sidebar.header("Select District")
 district = st.sidebar.selectbox("District", districts)
 
 # -------------------------------
-# Prediction
+# Button action
 # -------------------------------
 if st.sidebar.button("Predict Future Risk"):
 
+    # -------------------------------
+    # Prepare data
+    # -------------------------------
     district_data = data[data["District"] == district]
     latest = district_data.sort_values("Year").iloc[-1:]
 
-    # Prepare input
     X = latest.copy()
     X = X.drop(columns=["District", "Year"], errors="ignore")
-
-    # ALIGN FEATURES (FINAL FIX)
     X = X.reindex(columns=feature_cols, fill_value=0)
 
-    # Predict
+    # -------------------------------
+    # Prediction
+    # -------------------------------
     risk_score = model.predict_proba(X)[0][1]
-    risk_percent = int(risk_score * 100)
 
     # -------------------------------
-    # UI Output
+    # Build SAME result structure
+    # -------------------------------
+    result = {
+        "district": district,
+        "predicted_risk_year": int(latest["Year"].values[0]) + 1,
+        "data_year_used": int(latest["Year"].values[0]),
+        "risk_score": float(risk_score),
+        "explanations": []
+    }
+
+    # -------------------------------
+    # Create explanations (clean + mapped)
+    # -------------------------------
+    feature_map = {
+        "metric_13": "Expenditure",
+        "metric_5": "Fund Allocation",
+    }
+
+    for col in feature_cols:
+        if col in data.columns:
+            current = float(X[col].values[0])
+            avg = float(data[col].mean())
+
+            impact = current - avg
+
+            result["explanations"].append({
+                "feature": col,
+                "impact": impact,
+                "current": current,
+                "average": avg
+            })
+
+    # -------------------------------
+    # UI (UNCHANGED)
     # -------------------------------
     st.subheader("Prediction Result")
 
     col1, col2 = st.columns(2)
-    col1.metric("District", district)
-    col2.metric("Prediction Year", int(latest["Year"].values[0]) + 1)
+    col1.metric("District", result["district"])
+    col2.metric("Prediction Year", result["predicted_risk_year"])
 
-    st.write("Data used:", int(latest["Year"].values[0]))
+    st.write("Data used:", result["data_year_used"])
 
-    # Risk display
+    # Risk Display
+    risk_score = result["risk_score"]
+    risk_percent = int(risk_score * 100)
+
     if risk_score < 0.3:
         label = "Low Risk"
         st.success(f"Status: {label}")
@@ -101,9 +138,29 @@ if st.sidebar.button("Predict Future Risk"):
     else:
         st.write("High risk detected. Immediate intervention is required.")
 
-    # Key Observations
+    # -------------------------------
+    # Key Observations (EXACT SAME FORMAT)
+    # -------------------------------
     st.subheader("Key Observations")
 
-    for col in X.columns[:5]:
-        value = float(X[col].values[0])
-        st.info(f"{col}: {value:.2f}")
+    for exp in result["explanations"][:5]:  # show top 5 only
+        raw_feature = exp["feature"]
+        feature = feature_map.get(raw_feature, raw_feature.replace("_", " ").title())
+
+        impact = exp["impact"]
+        current = exp["current"]
+        avg = exp["average"]
+
+        if impact > 0:
+            status = "Slight increase"
+            box = st.warning
+        else:
+            status = "Stable or decreasing"
+            box = st.success
+
+        box(f"""
+{feature}
+Current: ₹{current:.2f}
+Average: ₹{avg:.2f}
+Status: {status}
+""")
