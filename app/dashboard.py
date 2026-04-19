@@ -1,11 +1,17 @@
 import streamlit as st
 import pandas as pd
 import pickle
+import joblib
 import os
+
+# -------------------------------
+# Paths
+# -------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DATA_PATH = os.path.join(BASE_DIR, "..", "data", "processed", "final_time_series_dataset.csv")
 MODEL_PATH = os.path.join(BASE_DIR, "..", "models", "risk_model.pkl")
+FEATURE_PATH = os.path.join(BASE_DIR, "..", "models", "feature_columns.pkl")
 
 # -------------------------------
 # Page config
@@ -21,44 +27,38 @@ data = pd.read_csv(DATA_PATH)
 districts = sorted(data["District"].unique())
 
 # -------------------------------
-# Load model
+# Load model + feature columns
 # -------------------------------
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
+
+feature_cols = joblib.load(FEATURE_PATH)
 
 # Sidebar
 st.sidebar.header("Select District")
 district = st.sidebar.selectbox("District", districts)
 
 # -------------------------------
-# Button action
+# Prediction
 # -------------------------------
 if st.sidebar.button("Predict Future Risk"):
 
-    # Get latest data for district
     district_data = data[data["District"] == district]
     latest = district_data.sort_values("Year").iloc[-1:]
 
     # Prepare input
     X = latest.copy()
     X = X.drop(columns=["District", "Year"], errors="ignore")
-    X = X.select_dtypes(include=["number"])
-    X = X.fillna(0)
 
-    # -------------------------------
-    # Prediction
-    # -------------------------------
-    try:
-        risk_score = model.predict_proba(X)[0][1]
-    except:
-        st.error("Model feature mismatch. Please check training columns.")
-        st.write("Columns passed:", list(X.columns))
-        st.stop()
+    # ALIGN FEATURES (FINAL FIX)
+    X = X.reindex(columns=feature_cols, fill_value=0)
 
+    # Predict
+    risk_score = model.predict_proba(X)[0][1]
     risk_percent = int(risk_score * 100)
 
     # -------------------------------
-    # Prediction Result
+    # UI Output
     # -------------------------------
     st.subheader("Prediction Result")
 
@@ -68,9 +68,7 @@ if st.sidebar.button("Predict Future Risk"):
 
     st.write("Data used:", int(latest["Year"].values[0]))
 
-    # -------------------------------
-    # Risk Display
-    # -------------------------------
+    # Risk display
     if risk_score < 0.3:
         label = "Low Risk"
         st.success(f"Status: {label}")
@@ -83,9 +81,7 @@ if st.sidebar.button("Predict Future Risk"):
 
     st.write(f"Risk Probability: {risk_percent}%")
 
-    # -------------------------------
     # Summary
-    # -------------------------------
     st.subheader("Summary")
 
     if label == "Low Risk":
@@ -95,9 +91,7 @@ if st.sidebar.button("Predict Future Risk"):
     else:
         st.write("The scheme is at high risk and needs urgent attention.")
 
-    # -------------------------------
     # Recommended Action
-    # -------------------------------
     st.subheader("Recommended Action")
 
     if label == "Low Risk":
@@ -107,21 +101,9 @@ if st.sidebar.button("Predict Future Risk"):
     else:
         st.write("High risk detected. Immediate intervention is required.")
 
-    # -------------------------------
-    # Key Observations (approx)
-    # -------------------------------
+    # Key Observations
     st.subheader("Key Observations")
 
-    feature_map = {
-        "metric_13": "Expenditure",
-        "metric_5": "Fund Allocation",
-    }
-
     for col in X.columns[:5]:
-        name = feature_map.get(col, col.replace("_", " ").title())
         value = float(X[col].values[0])
-
-        if value > X[col].mean():
-            st.warning(f"{name}\nCurrent: ₹{value:.2f} (Above average)")
-        else:
-            st.success(f"{name}\nCurrent: ₹{value:.2f} (Normal)")
+        st.info(f"{col}: {value:.2f}")
