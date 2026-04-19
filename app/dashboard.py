@@ -4,43 +4,29 @@ import pickle
 import joblib
 import os
 
-# -------------------------------
-# Paths
-# -------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DATA_PATH = os.path.join(BASE_DIR, "..", "data", "processed", "final_time_series_dataset.csv")
 MODEL_PATH = os.path.join(BASE_DIR, "..", "models", "risk_model.pkl")
 FEATURE_PATH = os.path.join(BASE_DIR, "..", "models", "feature_columns.pkl")
 
-# -------------------------------
-# Page config
-# -------------------------------
 st.set_page_config(page_title="AI Governance Monitor", layout="wide")
 
 st.title("AI Governance Monitoring System")
 
-# -------------------------------
-# Load data
-# -------------------------------
+
 data = pd.read_csv(DATA_PATH)
 districts = sorted(data["District"].unique())
 
-# -------------------------------
-# Load model + features
-# -------------------------------
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
 
 feature_cols = joblib.load(FEATURE_PATH)
 
-# Sidebar
+
 st.sidebar.header("Select District")
 district = st.sidebar.selectbox("District", districts)
 
-# -------------------------------
-# Button action
-# -------------------------------
 if st.sidebar.button("Predict Future Risk"):
 
     # Prepare latest district data
@@ -54,7 +40,7 @@ if st.sidebar.button("Predict Future Risk"):
     # Prediction
     risk_score = model.predict_proba(X)[0][1]
 
-    # Create result structure (same as before)
+    # Create result structure
     result = {
         "district": district,
         "predicted_risk_year": int(latest["Year"].values[0]) + 1,
@@ -78,7 +64,7 @@ if st.sidebar.button("Predict Future Risk"):
             })
 
     # -------------------------------
-    # UI (same)
+    # UI
     # -------------------------------
     st.subheader("Prediction Result")
 
@@ -104,7 +90,6 @@ if st.sidebar.button("Predict Future Risk"):
 
     st.write(f"Risk Probability: {risk_percent}%")
 
-    # Summary
     st.subheader("Summary")
 
     if label == "Low Risk":
@@ -114,7 +99,7 @@ if st.sidebar.button("Predict Future Risk"):
     else:
         st.write("The scheme is at high risk and needs urgent attention.")
 
-    # Recommended Action
+  
     st.subheader("Recommended Action")
 
     if label == "Low Risk":
@@ -124,49 +109,57 @@ if st.sidebar.button("Predict Future Risk"):
     else:
         st.write("High risk detected. Immediate intervention is required.")
 
-    # -------------------------------
-    # CLEAN Key Observations
-    # -------------------------------
+
     st.subheader("Key Observations")
 
-    # Meaningful names
+    # Mapping (customize if you know real meanings)
     feature_map = {
         "metric_13": "Expenditure",
         "metric_5": "Fund Allocation",
-        "metric_2": "Scheme Budget",
-        "metric_3": "Utilization",
+        "metric_2": "Budget Usage",
+        "metric_3": "Utilization Efficiency",
         "metric_4": "Total Spending",
     }
 
-    # Remove useless + sort by importance
+    def clean_name(feature):
+        name = feature.lower()
+
+        if "rolling" in name:
+            return "Financial Trend"
+        if "metric" in name:
+            return "Financial Indicator"
+
+        return feature_map.get(feature, "Scheme Indicator")
+
+    # Filter useful features
     filtered = [
         exp for exp in result["explanations"]
         if "sno" not in exp["feature"].lower()
         and "id" not in exp["feature"].lower()
     ]
 
-    # Top impactful features only
+    # Top 3 impactful
     filtered = sorted(filtered, key=lambda x: abs(x["impact"]), reverse=True)[:3]
 
+    # Display clean insights
     for exp in filtered:
-        raw_feature = exp["feature"]
-        feature = feature_map.get(raw_feature, raw_feature.replace("_", " ").title())
-
-        impact = exp["impact"]
+        feature = clean_name(exp["feature"])
         current = exp["current"]
         avg = exp["average"]
+        impact = exp["impact"]
 
         if impact > 0:
-            status = "Above average"
+            status = "higher than usual"
             box = st.warning
         else:
-            status = "Below average"
+            status = "lower than usual"
             box = st.success
 
         box(f"""
 **{feature}**
-Current: ₹{current:,.0f}
-Average: ₹{avg:,.0f}
-Status: {status}
+
+Current value: ₹{current:,.0f}  
+Typical value: ₹{avg:,.0f}  
+
+This is {status}, which may affect overall scheme performance.
 """)
-        
