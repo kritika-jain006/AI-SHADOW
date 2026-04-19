@@ -1,28 +1,52 @@
 import streamlit as st
 import pandas as pd
-import requests
+import pickle
+import os
 
+# -------------------------------
+# Paths (IMPORTANT for deployment)
+# -------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DATA_PATH = os.path.join(BASE_DIR, "..", "data", "processed", "final_time_series_dataset.csv")
+MODEL_PATH = os.path.join(BASE_DIR, "..", "models", "risk_model.pkl")
+
+# -------------------------------
 # Page config
+# -------------------------------
 st.set_page_config(page_title="AI Governance Monitor", layout="wide")
 
-# Title
 st.title("AI Governance Monitoring System")
 
-# Load data
-data = pd.read_csv("data/processed/final_time_series_dataset.csv")
+# -------------------------------
+# Load data + model
+# -------------------------------
+data = pd.read_csv(DATA_PATH)
+
+with open(MODEL_PATH, "rb") as f:
+    model = pickle.load(f)
+
 districts = sorted(data["District"].unique())
 
+# -------------------------------
 # Sidebar
+# -------------------------------
 st.sidebar.header("Select District")
 district = st.sidebar.selectbox("District", districts)
 
-# Button action
+# -------------------------------
+# Prediction Logic (NO API)
+# -------------------------------
 if st.sidebar.button("Predict Future Risk"):
 
-    # API call
-    url = f"http://127.0.0.1:8000/predict/{district}"
-    response = requests.get(url)
-    result = response.json()
+    district_data = data[data["District"] == district]
+
+    latest = district_data.sort_values("Year").iloc[-1:]
+
+    X = latest.drop(columns=["District", "Year"], errors="ignore")
+
+    risk_score = model.predict_proba(X)[0][1]
+    risk_percent = int(risk_score * 100)
 
     # -------------------------------
     # Prediction Result
@@ -30,17 +54,12 @@ if st.sidebar.button("Predict Future Risk"):
     st.subheader("Prediction Result")
 
     col1, col2 = st.columns(2)
-    col1.metric("District", result["district"])
-    col2.metric("Prediction Year", result["predicted_risk_year"])
-
-    # st.write("Data used:", result["data_year_used"])
+    col1.metric("District", district)
+    col2.metric("Prediction Year", int(latest["Year"].values[0]) + 1)
 
     # -------------------------------
-    # Risk Display (User Friendly)
+    # Risk Display
     # -------------------------------
-    risk_score = result["risk_score"]
-    risk_percent = int(risk_score * 100)
-
     if risk_score < 0.3:
         label = "Low Risk"
         st.success(f"Status: {label}")
@@ -78,35 +97,10 @@ if st.sidebar.button("Predict Future Risk"):
         st.write("High risk detected. Immediate intervention is required.")
 
     # -------------------------------
-    # Key Observations (FIXED + CLEAN)
+    # Key Observations (simple version)
     # -------------------------------
     st.subheader("Key Observations")
 
-    # Optional: Rename metrics to meaningful names
-    feature_map = {
-        "metric_13": "Expenditure",
-        "metric_5": "Fund Allocation",
-    }
-
-    for exp in result["explanations"]:
-        raw_feature = exp["feature"]
-        feature = feature_map.get(raw_feature, raw_feature.replace("_", " ").title())
-
-        impact = exp["impact"]
-        current = exp["current"]
-        avg = exp["average"]
-
-        # Convert to simple human status
-        if impact > 0:
-            status = "Slight increase"
-            box = st.warning
-        else:
-            status = "Stable or decreasing"
-            box = st.success
-
-        box(f"""
-{feature}
-Current: ₹{current:.2f}
-Average: ₹{avg:.2f}
-Status: {status}
-""")
+    for col in X.columns[:3]:  # just showing first 3 features
+        value = float(X[col].values[0])
+        st.info(f"{col}: {value:.2f}")
