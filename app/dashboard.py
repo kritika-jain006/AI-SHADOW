@@ -43,9 +43,7 @@ district = st.sidebar.selectbox("District", districts)
 # -------------------------------
 if st.sidebar.button("Predict Future Risk"):
 
-    # -------------------------------
-    # Prepare data
-    # -------------------------------
+    # Prepare latest district data
     district_data = data[data["District"] == district]
     latest = district_data.sort_values("Year").iloc[-1:]
 
@@ -53,14 +51,10 @@ if st.sidebar.button("Predict Future Risk"):
     X = X.drop(columns=["District", "Year"], errors="ignore")
     X = X.reindex(columns=feature_cols, fill_value=0)
 
-    # -------------------------------
     # Prediction
-    # -------------------------------
     risk_score = model.predict_proba(X)[0][1]
 
-    # -------------------------------
-    # Build SAME result structure
-    # -------------------------------
+    # Create result structure (same as before)
     result = {
         "district": district,
         "predicted_risk_year": int(latest["Year"].values[0]) + 1,
@@ -69,19 +63,11 @@ if st.sidebar.button("Predict Future Risk"):
         "explanations": []
     }
 
-    # -------------------------------
-    # Create explanations (clean + mapped)
-    # -------------------------------
-    feature_map = {
-        "metric_13": "Expenditure",
-        "metric_5": "Fund Allocation",
-    }
-
+    # Build explanations
     for col in feature_cols:
         if col in data.columns:
             current = float(X[col].values[0])
             avg = float(data[col].mean())
-
             impact = current - avg
 
             result["explanations"].append({
@@ -92,7 +78,7 @@ if st.sidebar.button("Predict Future Risk"):
             })
 
     # -------------------------------
-    # UI (UNCHANGED)
+    # UI (same)
     # -------------------------------
     st.subheader("Prediction Result")
 
@@ -102,7 +88,7 @@ if st.sidebar.button("Predict Future Risk"):
 
     st.write("Data used:", result["data_year_used"])
 
-    # Risk Display
+    # Risk display
     risk_score = result["risk_score"]
     risk_percent = int(risk_score * 100)
 
@@ -139,11 +125,30 @@ if st.sidebar.button("Predict Future Risk"):
         st.write("High risk detected. Immediate intervention is required.")
 
     # -------------------------------
-    # Key Observations (EXACT SAME FORMAT)
+    # CLEAN Key Observations
     # -------------------------------
     st.subheader("Key Observations")
 
-    for exp in result["explanations"][:5]:  # show top 5 only
+    # Meaningful names
+    feature_map = {
+        "metric_13": "Expenditure",
+        "metric_5": "Fund Allocation",
+        "metric_2": "Scheme Budget",
+        "metric_3": "Utilization",
+        "metric_4": "Total Spending",
+    }
+
+    # Remove useless + sort by importance
+    filtered = [
+        exp for exp in result["explanations"]
+        if "sno" not in exp["feature"].lower()
+        and "id" not in exp["feature"].lower()
+    ]
+
+    # Top impactful features only
+    filtered = sorted(filtered, key=lambda x: abs(x["impact"]), reverse=True)[:3]
+
+    for exp in filtered:
         raw_feature = exp["feature"]
         feature = feature_map.get(raw_feature, raw_feature.replace("_", " ").title())
 
@@ -152,15 +157,16 @@ if st.sidebar.button("Predict Future Risk"):
         avg = exp["average"]
 
         if impact > 0:
-            status = "Slight increase"
+            status = "Above average"
             box = st.warning
         else:
-            status = "Stable or decreasing"
+            status = "Below average"
             box = st.success
 
         box(f"""
-{feature}
-Current: ₹{current:.2f}
-Average: ₹{avg:.2f}
+**{feature}**
+Current: ₹{current:,.0f}
+Average: ₹{avg:,.0f}
 Status: {status}
 """)
+        
