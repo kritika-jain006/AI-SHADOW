@@ -44,23 +44,43 @@ if st.sidebar.button("Predict Future Risk"):
         "explanations": []
     }
 
+    # -------------------------------
+    # ORIGINAL-STYLE EXPLANATIONS
+    # -------------------------------
+    feature_map = {
+        "metric_13": "Expenditure",
+        "metric_5": "Fund Allocation",
+        "metric_2": "Budget Usage",
+        "metric_3": "Utilization Efficiency",
+        "metric_4": "Total Spending",
+    }
+
     for col in feature_cols:
-        if col in data.columns:
-            current = float(X[col].values[0])
-            avg = float(data[col].median())
+        if col not in data.columns:
+            continue
 
-            if avg != 0:
-                percent_diff = ((current - avg) / avg) * 100
-            else:
-                percent_diff = 0
+        current = X[col].values[0]
 
-            result["explanations"].append({
-                "feature": col,
-                "current": current,
-                "average": avg,
-                "percent_diff": percent_diff
-            })
+        if pd.isna(current):
+            continue
 
+        avg = data[col].mean()
+
+        if pd.isna(avg):
+            continue
+
+        impact = current - avg
+
+        result["explanations"].append({
+            "feature": col,
+            "impact": impact,
+            "current": float(current),
+            "average": float(avg)
+        })
+
+    # -------------------------------
+    # UI
+    # -------------------------------
     st.subheader("Prediction Result")
 
     col1, col2 = st.columns(2)
@@ -101,46 +121,31 @@ if st.sidebar.button("Predict Future Risk"):
     else:
         st.write("High risk detected. Immediate intervention is required.")
 
+    # -------------------------------
+    # ORIGINAL KEY OBSERVATIONS (RESTORED)
+    # -------------------------------
     st.subheader("Key Observations")
 
-    def clean_name(feature):
-        name = feature.lower()
-        if "rolling" in name:
-            return "Financial Trend"
-        if "metric" in name:
-            return "Financial Indicator"
-        return "Scheme Indicator"
+    explanations = sorted(result["explanations"], key=lambda x: abs(x["impact"]), reverse=True)[:3]
 
-    filtered = [
-        exp for exp in result["explanations"]
-        if "sno" not in exp["feature"].lower()
-        and "id" not in exp["feature"].lower()
-    ]
+    for exp in explanations:
+        raw_feature = exp["feature"]
+        feature = feature_map.get(raw_feature, raw_feature.replace("_", " ").title())
 
-    filtered = sorted(filtered, key=lambda x: abs(x["percent_diff"]), reverse=True)[:3]
-
-    for exp in filtered:
-        feature = clean_name(exp["feature"])
+        impact = exp["impact"]
         current = exp["current"]
         avg = exp["average"]
-        percent_diff = exp["percent_diff"]
 
-        if percent_diff > 10:
-            status = "significantly higher than usual"
+        if impact > 0:
+            status = "Slight increase"
             box = st.warning
-        elif percent_diff < -10:
-            status = "significantly lower than usual"
-            box = st.error
         else:
-            status = "within normal range"
+            status = "Stable or decreasing"
             box = st.success
 
         box(f"""
-**{feature}**
-
-Current value: ₹{current:,.0f}  
-Typical value: ₹{avg:,.0f}  
-
-Difference from normal: {percent_diff:.1f}%  
-This is {status}.
+{feature}
+Current: ₹{current:.2f}
+Average: ₹{avg:.2f}
+Status: {status}
 """)
